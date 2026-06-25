@@ -214,8 +214,8 @@ function matchesLocation(jobLoc, requested) {
 }
 
 function matchesType(job, type) {
-  if (!type) return true;
-  const text = (job.title + ' ' + job.snippet + ' ' + job.location).toLowerCase();
+  if (!type || type === 'any' || type === 'fulltime') return true;
+  const text = (job.title + ' ' + job.snippet).toLowerCase();
   if (type === 'student')  return STUDENT_KEYWORDS.some(k => text.includes(k));
   if (type === 'parttime') return PARTTIME_KEYWORDS.some(k => text.includes(k));
   return true;
@@ -227,17 +227,24 @@ app.post('/api/jobs', async (req, res) => {
   const results = [];
   const sources = [];
 
-  const loc     = location === 'all' ? '' : location;
-  const jiTypes = type === 'student' ? 'studiejob' : type === 'parttime' ? 'deltid' : '';
+  const loc    = (location === 'all' || location === '') ? '' : location;
   const azWhere = { Copenhagen: 'Copenhagen', Aarhus: 'Aarhus', Odense: 'Odense', '': '' }[loc] ?? loc;
-  const azType  = { fulltime: 'permanent', parttime: 'part_time', student: '' }[type] || '';
-  const azQ     = type === 'student' ? `${keywords} student studiejob`.trim() : keywords;
+  const azType  = { fulltime: 'permanent', parttime: 'part_time', student: '', any: '' }[type] || '';
+
+  // Jobindex ignores jobtypes= in RSS — inject type terms into keyword search instead
+  const TYPE_EXTRA = {
+    student:  'studiejob studentermedhjælper',
+    parttime: 'deltid',
+    fulltime: 'fuldtid',
+  };
+  const typeExtra = TYPE_EXTRA[type] || '';
+  const jiQ  = [keywords, typeExtra].filter(Boolean).join(' ');
+  const azQ  = [keywords, type === 'student' ? 'student studiejob' : ''].filter(Boolean).join(' ');
 
   // ── Source 1: Jobindex.dk RSS ───────────────────────────────────
   try {
     const url = new URL('https://www.jobindex.dk/jobsoegning.xml');
-    if (keywords) url.searchParams.set('q',        keywords);
-    if (jiTypes)  url.searchParams.set('jobtypes', jiTypes);
+    if (jiQ) url.searchParams.set('q', jiQ);
 
     const r    = await fetch(url.toString(), {
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible; JobOverview/1.0)' },
@@ -270,7 +277,7 @@ app.post('/api/jobs', async (req, res) => {
       url.searchParams.set('app_key',          apiKey);
       url.searchParams.set('results_per_page', '15');
       url.searchParams.set('sort_by',          'relevance');
-      if (azQ)     url.searchParams.set('what',          azQ);
+      if (azQ)     url.searchParams.set('what',  azQ);
       if (azWhere) url.searchParams.set('where',         azWhere);
       if (azType)  url.searchParams.set('contract_type', azType);
 
