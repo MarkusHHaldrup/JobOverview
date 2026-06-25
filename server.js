@@ -299,7 +299,73 @@ app.post('/api/jobs', async (req, res) => {
     } catch (e) { console.error('Adzuna:', e.message); }
   }
 
-  // Post-filter by location and job type, then deduplicate, keep top 10
+  // ── Source 3: TheHub.io ─────────────────────────────────────────
+  try {
+    const url = new URL('https://thehub.io/api/jobs');
+    url.searchParams.set('countryCode', 'DK');
+    url.searchParams.set('limit',       '20');
+    if (jiQ) url.searchParams.set('q', jiQ);
+
+    const r    = await fetch(url.toString(), {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; JobOverview/1.0)' },
+    });
+    const data = await r.json();
+    for (const j of data.docs || []) {
+      const jobLoc = (j.location?.locality || '').toLowerCase();
+      results.push({
+        id:       'th_' + j.id,
+        title:    (j.title || '').trim(),
+        company:  j.company?.name || '—',
+        location: j.location?.locality || 'Denmark',
+        snippet:  (j.description || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 220),
+        url:      j.absoluteJobUrl || '',
+        source:   'TheHub.io',
+        date:     (j.publishedAt || j.createdAt || '').slice(0, 10),
+      });
+    }
+    if (data.docs?.length) sources.push('TheHub.io');
+  } catch (e) { console.error('TheHub:', e.message); }
+
+  // ── Source 4: Jobsearch.dk RSS ──────────────────────────────────
+  try {
+    const JS_CITY = { Copenhagen: '9', Aarhus: '11', Odense: '10' };
+    const cityId  = loc ? JS_CITY[loc] : '';
+    const feedUrl = cityId
+      ? `https://jobsearch.dk/feed/job-annoncer/${cityId}`
+      : 'https://jobsearch.dk/feed/job-annoncer';
+
+    const r   = await fetch(feedUrl, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; JobOverview/1.0)' },
+    });
+    const xml = await r.text();
+    const itemRx = /<item>([\s\S]*?)<\/item>/g;
+    const tagRx  = tag => new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, 'i');
+    const get    = (b, t) => { const m = b.match(tagRx(t)); return m ? m[1].trim() : ''; };
+    let m;
+    while ((m = itemRx.exec(xml)) !== null) {
+      const b       = m[1];
+      const rawTitle = decodeEntities(get(b, 'title'));  // "Category i City"
+      const category = rawTitle.replace(/\s+i\b.*$/, '').trim() || rawTitle.trim();
+      const city     = (rawTitle.match(/\s+i\s+(.+)/) || [])[1]?.trim() || '';
+      const link     = get(b, 'link').replace(/\s/g, '');
+      const snippet  = decodeEntities(get(b, 'description')).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 220);
+      const jobId    = 'js_' + (link.match(/\/(\d+)$/)?.[1] || link.slice(-10));
+      results.push({
+        id:       jobId,
+        title:    category,
+        company:  '—',
+        location: city || (loc ? { Copenhagen: 'Copenhagen', Aarhus: 'Aarhus', Odense: 'Odense' }[loc] : 'Denmark'),
+        snippet,
+        url:      link,
+        source:   'Jobsearch.dk',
+        date:     '',
+      });
+    }
+    const jsCount = results.filter(j => j.source === 'Jobsearch.dk').length;
+    if (jsCount) sources.push('Jobsearch.dk');
+  } catch (e) { console.error('Jobsearch:', e.message); }
+
+  // Post-filter by location and job type, then deduplicate, keep top 20
   const seen   = new Set();
   const unique = results
     .filter(j => matchesLocation(j.location, location) && matchesType(j, type))
@@ -309,7 +375,7 @@ app.post('/api/jobs', async (req, res) => {
       seen.add(key);
       return true;
     })
-    .slice(0, 10);
+    .slice(0, 20);
 
   res.json({ jobs: unique, sources });
 });
