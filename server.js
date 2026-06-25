@@ -253,7 +253,7 @@ app.post('/api/jobs', async (req, res) => {
     const buf  = await r.arrayBuffer();
     const xml  = new TextDecoder('iso-8859-1').decode(buf);
     const items = parseRSS(xml);
-    for (const j of items) {
+    for (const j of items.slice(0, 10)) {
       const id = 'ji_' + (j.link.match(/\/([a-z0-9]+)$/i)?.[1] || Buffer.from(j.link).toString('base64').slice(-12));
       results.push({
         id,
@@ -326,56 +326,30 @@ app.post('/api/jobs', async (req, res) => {
     if (data.docs?.length) sources.push('TheHub.io');
   } catch (e) { console.error('TheHub:', e.message); }
 
-  // ── Source 4: Jobsearch.dk RSS ──────────────────────────────────
-  try {
-    const JS_CITY = { Copenhagen: '9', Aarhus: '11', Odense: '10' };
-    const cityId  = loc ? JS_CITY[loc] : '';
-    const feedUrl = cityId
-      ? `https://jobsearch.dk/feed/job-annoncer/${cityId}`
-      : 'https://jobsearch.dk/feed/job-annoncer';
+  // Post-filter, dedup, then interleave by source so no single source dominates
+  const seen    = new Set();
+  const filtered = results.filter(j => {
+    if (!matchesLocation(j.location, location) || !matchesType(j, type)) return false;
+    const key = (j.title + j.company).toLowerCase().replace(/\s+/g, '');
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 
-    const r   = await fetch(feedUrl, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; JobOverview/1.0)' },
-    });
-    const xml = await r.text();
-    const itemRx = /<item>([\s\S]*?)<\/item>/g;
-    const tagRx  = tag => new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, 'i');
-    const get    = (b, t) => { const m = b.match(tagRx(t)); return m ? m[1].trim() : ''; };
-    let m;
-    while ((m = itemRx.exec(xml)) !== null) {
-      const b       = m[1];
-      const rawTitle = decodeEntities(get(b, 'title'));  // "Category i City"
-      const category = rawTitle.replace(/\s+i\b.*$/, '').trim() || rawTitle.trim();
-      const city     = (rawTitle.match(/\s+i\s+(.+)/) || [])[1]?.trim() || '';
-      const link     = get(b, 'link').replace(/\s/g, '');
-      const snippet  = decodeEntities(get(b, 'description')).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 220);
-      const jobId    = 'js_' + (link.match(/\/(\d+)$/)?.[1] || link.slice(-10));
-      results.push({
-        id:       jobId,
-        title:    category,
-        company:  '—',
-        location: city || (loc ? { Copenhagen: 'Copenhagen', Aarhus: 'Aarhus', Odense: 'Odense' }[loc] : 'Denmark'),
-        snippet,
-        url:      link,
-        source:   'Jobsearch.dk',
-        date:     '',
-      });
+  // Group by source, then round-robin up to 20 total
+  const bySource = {};
+  for (const j of filtered) {
+    if (!bySource[j.source]) bySource[j.source] = [];
+    bySource[j.source].push(j);
+  }
+  const pools  = Object.values(bySource);
+  const unique = [];
+  const maxLen = Math.max(0, ...pools.map(a => a.length));
+  for (let i = 0; i < maxLen && unique.length < 20; i++) {
+    for (const pool of pools) {
+      if (i < pool.length && unique.length < 20) unique.push(pool[i]);
     }
-    const jsCount = results.filter(j => j.source === 'Jobsearch.dk').length;
-    if (jsCount) sources.push('Jobsearch.dk');
-  } catch (e) { console.error('Jobsearch:', e.message); }
-
-  // Post-filter by location and job type, then deduplicate, keep top 20
-  const seen   = new Set();
-  const unique = results
-    .filter(j => matchesLocation(j.location, location) && matchesType(j, type))
-    .filter(j => {
-      const key = (j.title + j.company).toLowerCase().replace(/\s+/g, '');
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    })
-    .slice(0, 20);
+  }
 
   res.json({ jobs: unique, sources });
 });
