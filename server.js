@@ -167,15 +167,15 @@ function parseRSS(xml) {
   let m;
   while ((m = itemRx.exec(xml)) !== null) {
     const b    = m[1];
-    const raw  = get(b, 'description');
-    const html = decodeEntities(raw);                                       // un-escape the inner HTML
-    const locM = html.match(/class="jix_robotjob--area"[^>]*>([^<]+)</i);  // extract city from span
-    const loc  = locM ? locM[1].trim() : '';
-    const text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 220);
-    const raw   = decodeEntities(get(b, 'title'));
-    const comma = raw.lastIndexOf(', ');
-    const title   = comma > 0 ? raw.slice(0, comma).trim() : raw;
-    const company = comma > 0 ? raw.slice(comma + 2).trim() : (decodeEntities(get(b, 'author')) || '—');
+    const rawDesc = get(b, 'description');
+    const html    = decodeEntities(rawDesc);
+    const locM    = html.match(/class="jix_robotjob--area"[^>]*>([^<]+)</i);
+    const loc     = locM ? locM[1].trim() : '';
+    const text    = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 220);
+    const rawTitle = decodeEntities(get(b, 'title'));
+    const comma   = rawTitle.lastIndexOf(', ');
+    const title   = comma > 0 ? rawTitle.slice(0, comma).trim() : rawTitle;
+    const company = comma > 0 ? rawTitle.slice(comma + 2).trim() : (decodeEntities(get(b, 'author')) || '—');
     const link    = get(b, 'link').replace(/\s/g, '');
     items.push({
       title,
