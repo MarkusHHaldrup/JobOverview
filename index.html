@@ -29,6 +29,23 @@
 
   <!-- ── My Applications ── -->
   <section id="applications" class="tab-content">
+
+    <!-- Gmail status bar -->
+    <div id="gmail-bar" class="gmail-bar">
+      <div id="gmail-status-disconnected" class="gmail-status-pane hidden">
+        <span class="gmail-status-label">📧 Gmail not connected</span>
+        <button id="gmail-connect-btn" class="gmail-action-btn">Connect Gmail</button>
+      </div>
+      <div id="gmail-status-connected" class="gmail-status-pane hidden">
+        <span class="gmail-status-label gmail-status-ok">📧 Gmail connected</span>
+        <button id="gmail-sync-btn" class="gmail-action-btn">⟳ Sync with Gmail</button>
+        <button id="gmail-disconnect-btn" class="gmail-action-btn secondary">Disconnect</button>
+      </div>
+      <div id="gmail-status-unavailable" class="gmail-status-pane hidden">
+        <span class="gmail-status-label gmail-status-muted">📧 Gmail sync requires the Node server</span>
+      </div>
+    </div>
+
     <div class="app-toolbar">
       <div class="filters">
         <button class="filter-btn active" data-status="all">All</button>
@@ -39,7 +56,6 @@
         <button class="filter-btn" data-status="rejected">Rejected</button>
       </div>
       <div class="toolbar-actions">
-        <button id="gmail-btn" class="gmail-btn" title="Sync job emails from Gmail">📧 Connect Gmail</button>
         <button id="add-btn">+ Add Manually</button>
       </div>
     </div>
@@ -79,6 +95,20 @@
       <div class="modal-actions">
         <button id="btn-save-manual">Save</button>
         <button id="btn-cancel-manual" class="secondary">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Gmail Sync Review Modal ── -->
+  <div id="sync-modal" class="modal hidden">
+    <div class="modal-box sync-modal-box">
+      <h2>Gmail Sync — Proposed Changes</h2>
+      <p id="sync-modal-summary" class="sync-summary"></p>
+      <div id="sync-review-list" class="sync-review-list"></div>
+      <div class="modal-actions">
+        <button id="btn-sync-apply-all">Apply All</button>
+        <button id="btn-sync-apply-selected" class="secondary">Apply Selected</button>
+        <button id="btn-sync-dismiss" class="secondary">Dismiss</button>
       </div>
     </div>
   </div>

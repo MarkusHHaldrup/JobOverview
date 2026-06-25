@@ -242,55 +242,53 @@ function saveApiKey() {
 }
 
 // ── Gmail sync ─────────────────────────────────────────────────────
-let _gmailAvailable = false; // true when running via the Node server
+let _gmailAvailable = false;
+let _pendingUpdates = []; // proposed changes awaiting user review
+
+function showGmailPane(name) {
+  ['disconnected', 'connected', 'unavailable'].forEach(n =>
+    document.getElementById(`gmail-status-${n}`).classList.toggle('hidden', n !== name)
+  );
+}
 
 async function initGmail() {
-  const btn = document.getElementById('gmail-btn');
   try {
     const res  = await fetch('/auth/status', { signal: AbortSignal.timeout(1500) });
     const data = await res.json();
     _gmailAvailable = true;
-    if (data.authenticated) {
-      btn.textContent = '⟳ Sync Gmail';
-      btn.classList.add('connected');
-    } else {
-      btn.textContent = '📧 Connect Gmail';
-    }
+    showGmailPane(data.authenticated ? 'connected' : 'disconnected');
   } catch {
-    // Server not running — disable the button
     _gmailAvailable = false;
-    btn.classList.add('unavailable');
-    btn.title = 'Start the Node server to enable Gmail sync';
+    showGmailPane('unavailable');
   }
 
   // Handle redirect back from OAuth
   const params = new URLSearchParams(location.search);
   if (params.get('gmail_ok')) {
-    history.replaceState({}, '', '/');
-    showToast('Gmail connected! Click "Sync Gmail" to check your emails.');
-    btn.textContent = '⟳ Sync Gmail';
-    btn.classList.add('connected');
+    history.replaceState({}, '', location.pathname);
+    showGmailPane('connected');
+    showToast('Gmail connected! Click "Sync with Gmail" to check your emails.');
     switchTab('applications');
   } else if (params.get('gmail_error')) {
-    history.replaceState({}, '', '/');
+    history.replaceState({}, '', location.pathname);
     showToast('Gmail authorisation failed — please try again.');
   }
 }
 
-async function handleGmailBtn() {
-  if (!_gmailAvailable) return;
-  const btn = document.getElementById('gmail-btn');
+function connectGmail() {
+  window.location.href = '/auth/google';
+}
 
-  if (!btn.classList.contains('connected')) {
-    // Not yet authorised — redirect to OAuth flow
-    window.location.href = '/auth/google';
-    return;
-  }
+async function disconnectGmail() {
+  try { await fetch('/auth/disconnect'); } catch { /* ignore */ }
+  showGmailPane('disconnected');
+  showToast('Gmail disconnected.');
+}
 
-  // Sync
-  btn.textContent = '⏳ Syncing…';
-  btn.classList.add('syncing');
-  btn.disabled = true;
+async function syncGmail() {
+  const syncBtn = document.getElementById('gmail-sync-btn');
+  syncBtn.textContent = '⏳ Syncing…';
+  syncBtn.disabled = true;
 
   try {
     const res = await fetch('/api/sync', {
@@ -302,41 +300,86 @@ async function handleGmailBtn() {
     });
 
     if (res.status === 401) {
-      btn.classList.remove('connected');
-      btn.textContent = '📧 Connect Gmail';
+      showGmailPane('disconnected');
       showToast('Gmail session expired — please reconnect.');
       return;
     }
     if (!res.ok) throw new Error(`Server error ${res.status}`);
 
     const { updates } = await res.json();
-    let changed = 0;
-    for (const u of updates) {
+
+    // Filter to only changes that actually differ from current status
+    _pendingUpdates = updates.filter(u => {
       const app = applications.find(a => a.id === u.appId);
-      if (app && app.status !== u.newStatus) {
-        app.status        = u.newStatus;
-        app.lastEmail     = u.emailSubject;
-        app.lastEmailDate = u.emailDate;
-        changed++;
-      }
+      return app && app.status !== u.newStatus;
+    });
+
+    if (_pendingUpdates.length === 0) {
+      showToast('Gmail synced — no new status changes found.');
+      return;
     }
 
-    saveData();
-    updateBadge();
-    renderApplications();
-
-    showToast(
-      changed > 0
-        ? `${changed} application${changed > 1 ? 's' : ''} updated from Gmail.`
-        : 'Gmail synced — no new status changes found.'
-    );
+    openSyncModal();
   } catch (err) {
     showToast('Sync failed: ' + err.message);
   } finally {
-    btn.textContent = '⟳ Sync Gmail';
-    btn.classList.remove('syncing');
-    btn.disabled = false;
+    syncBtn.textContent = '⟳ Sync with Gmail';
+    syncBtn.disabled = false;
   }
+}
+
+// ── Sync review modal ──────────────────────────────────────────────
+function openSyncModal() {
+  const n = _pendingUpdates.length;
+  document.getElementById('sync-modal-summary').textContent =
+    `Found ${n} email update${n > 1 ? 's' : ''} for your applications. Review and apply below.`;
+
+  document.getElementById('sync-review-list').innerHTML = _pendingUpdates.map((u, i) => {
+    const app       = applications.find(a => a.id === u.appId);
+    const oldLabel  = STATUSES[app.status]  || app.status;
+    const newLabel  = STATUSES[u.newStatus] || u.newStatus;
+    return `
+    <label class="sync-review-item">
+      <input type="checkbox" class="sync-check" data-index="${i}" checked>
+      <div class="sync-review-info">
+        <div class="sync-review-title">${escHtml(app.title)} <span class="sync-review-company">@ ${escHtml(app.company)}</span></div>
+        <div class="sync-review-change">
+          <span class="status-pill status-${app.status}">${oldLabel}</span>
+          <span class="sync-arrow">→</span>
+          <span class="status-pill status-${u.newStatus}">${newLabel}</span>
+        </div>
+        <div class="sync-review-email">📨 ${escHtml(u.emailSubject)}</div>
+      </div>
+    </label>`;
+  }).join('');
+
+  document.getElementById('sync-modal').classList.remove('hidden');
+}
+
+function closeSyncModal() {
+  document.getElementById('sync-modal').classList.add('hidden');
+  _pendingUpdates = [];
+}
+
+function applySyncUpdates(selectedOnly) {
+  const checks = document.querySelectorAll('.sync-check');
+  let applied  = 0;
+
+  _pendingUpdates.forEach((u, i) => {
+    if (selectedOnly && !checks[i]?.checked) return;
+    const app = applications.find(a => a.id === u.appId);
+    if (!app) return;
+    app.status        = u.newStatus;
+    app.lastEmail     = u.emailSubject;
+    app.lastEmailDate = u.emailDate;
+    applied++;
+  });
+
+  saveData();
+  updateBadge();
+  renderApplications();
+  closeSyncModal();
+  showToast(`${applied} application${applied > 1 ? 's' : ''} updated.`);
 }
 
 // ── Toast ──────────────────────────────────────────────────────────
@@ -382,7 +425,12 @@ function init() {
   document.getElementById('btn-cancel-api').addEventListener('click', closeApiModal);
 
   // Gmail
-  document.getElementById('gmail-btn').addEventListener('click', handleGmailBtn);
+  document.getElementById('gmail-connect-btn').addEventListener('click', connectGmail);
+  document.getElementById('gmail-sync-btn').addEventListener('click', syncGmail);
+  document.getElementById('gmail-disconnect-btn').addEventListener('click', disconnectGmail);
+  document.getElementById('btn-sync-apply-all').addEventListener('click', () => applySyncUpdates(false));
+  document.getElementById('btn-sync-apply-selected').addEventListener('click', () => applySyncUpdates(true));
+  document.getElementById('btn-sync-dismiss').addEventListener('click', closeSyncModal);
   initGmail();
 
   // Manual add
