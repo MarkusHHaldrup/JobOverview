@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JobOverview</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <header>
+    <span class="logo">JobOverview</span>
+    <nav>
+      <button class="tab active" data-tab="browse">Browse Jobs</button>
+      <button class="tab" data-tab="applications">My Applications <span id="app-count" class="badge hidden"></span></button>
+    </nav>
+  </header>
+
+  <!-- ── Browse Jobs ── -->
+  <section id="browse" class="tab-content active">
+    <div class="search-bar">
+      <input id="search-query" type="text" placeholder="Job title or keywords…">
+      <span class="loc-label">📍 Copenhagen</span>
+      <button id="search-btn">Search</button>
+      <button id="settings-btn" title="API settings">⚙</button>
+    </div>
+    <div id="job-list" class="job-grid"></div>
+  </section>
+
+  <!-- ── My Applications ── -->
+  <section id="applications" class="tab-content">
+    <div class="app-toolbar">
+      <div class="filters">
+        <button class="filter-btn active" data-status="all">All</button>
+        <button class="filter-btn" data-status="waiting">Waiting to Apply</button>
+        <button class="filter-btn" data-status="applied">Applied</button>
+        <button class="filter-btn" data-status="interview">Interview</button>
+        <button class="filter-btn" data-status="offer">Offer</button>
+        <button class="filter-btn" data-status="rejected">Rejected</button>
+      </div>
+      <button id="add-btn">+ Add Manually</button>
+    </div>
+    <div id="app-list"></div>
+  </section>
+
+  <!-- ── API Key Modal ── -->
+  <div id="api-modal" class="modal hidden">
+    <div class="modal-box">
+      <h2>Adzuna API Setup</h2>
+      <p>Register for a free key at <a href="https://developer.adzuna.com/" target="_blank" rel="noopener">developer.adzuna.com</a> (1 000 calls/month, no credit card).</p>
+      <label>App ID<input id="input-api-id" type="text" placeholder="xxxxxxxx"></label>
+      <label>App Key<input id="input-api-key" type="text" placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"></label>
+      <div class="modal-actions">
+        <button id="btn-save-api">Save &amp; Search</button>
+        <button id="btn-cancel-api" class="secondary">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Manual Add Modal ── -->
+  <div id="manual-modal" class="modal hidden">
+    <div class="modal-box">
+      <h2>Add Application</h2>
+      <label>Job title *<input id="m-title" type="text" placeholder="e.g. Software Engineer"></label>
+      <label>Company<input id="m-company" type="text" placeholder="e.g. Novo Nordisk"></label>
+      <label>Job posting URL<input id="m-url" type="url" placeholder="https://…"></label>
+      <label>Status
+        <select id="m-status">
+          <option value="waiting">Waiting to Apply</option>
+          <option value="applied">Applied</option>
+          <option value="interview">Interview Scheduled</option>
+          <option value="offer">Offer Received</option>
+          <option value="rejected">Rejected</option>
+        </select>
+      </label>
+      <div class="modal-actions">
+        <button id="btn-save-manual">Save</button>
+        <button id="btn-cancel-manual" class="secondary">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Toast ── -->
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
