@@ -171,6 +171,36 @@ function parseRSS(xml) {
   return items;
 }
 
+// ── Location & type post-filters ────────────────────────────────
+const LOCATION_KEYWORDS = {
+  Copenhagen: ['københavn', 'copenhagen', 'kbh', 'frederiksberg', 'hellerup', 'gentofte',
+               'lyngby', 'gladsaxe', 'brøndby', 'hvidovre', 'rødovre', 'ballerup',
+               'herlev', 'søborg', 'charlottenlund', 'vanløse', 'valby', 'amager',
+               'østerbro', 'nørrebro', 'vesterbro', 'indre by'],
+  Aarhus:     ['aarhus', 'århus', 'brabrand', 'viby', 'skejby', 'risskov'],
+  Odense:     ['odense', 'fyn', 'funen', 'svendborg', 'nyborg'],
+};
+
+const STUDENT_KEYWORDS = ['studiejob', 'studentermedhjælper', 'student assistant',
+                          'studentjob', 'studentermedhjælp', 'studiejob'];
+const PARTTIME_KEYWORDS = ['deltid', 'part-time', 'part time', 'delstilling'];
+
+function matchesLocation(jobLoc, requested) {
+  if (!requested) return true;
+  const loc  = jobLoc.toLowerCase();
+  const keys = LOCATION_KEYWORDS[requested];
+  if (!keys) return true;
+  return keys.some(k => loc.includes(k));
+}
+
+function matchesType(job, type) {
+  if (!type) return true;
+  const text = (job.title + ' ' + job.snippet + ' ' + job.location).toLowerCase();
+  if (type === 'student')  return STUDENT_KEYWORDS.some(k => text.includes(k));
+  if (type === 'parttime') return PARTTIME_KEYWORDS.some(k => text.includes(k));
+  return true;
+}
+
 // ── Multi-source job search ──────────────────────────────────────
 app.post('/api/jobs', async (req, res) => {
   const { keywords = '', location = 'Copenhagen', type = '' } = req.body;
@@ -178,7 +208,9 @@ app.post('/api/jobs', async (req, res) => {
   const sources = [];
 
   const jobnetCity = { Copenhagen: 'København', Aarhus: 'Aarhus', Odense: 'Odense', '': '' }[location] ?? location;
-  const jobnetQ    = type === 'student' ? `${keywords} studiejob studentermedhjælper`.trim() : keywords;
+  const jobnetQ    = type === 'student'
+    ? `${keywords} studiejob studentermedhjælper`.trim()
+    : keywords;
 
   const jiWhere = { Copenhagen: 'storkbh', Aarhus: 'midtjylland', Odense: 'fyn', '': '' }[location] ?? '';
   const jiTypes = type === 'student' ? 'studiejob' : type === 'parttime' ? 'deltid' : '';
@@ -188,9 +220,9 @@ app.post('/api/jobs', async (req, res) => {
     const url = new URL('https://job.jobnet.dk/CV/FindWork/Search');
     url.searchParams.set('Offset',    '0');
     url.searchParams.set('SortValue', 'BestMatch');
-    url.searchParams.set('Hits',      '10');
-    if (jobnetQ)    url.searchParams.set('SearchString',   jobnetQ);
-    if (jobnetCity) url.searchParams.set('WorkPlaceCity',  jobnetCity);
+    url.searchParams.set('Hits',      '20');
+    if (jobnetQ)    url.searchParams.set('SearchString',  jobnetQ);
+    if (jobnetCity) url.searchParams.set('WorkPlaceCity', jobnetCity);
 
     const r    = await fetch(url.toString(), { headers: { Accept: 'application/json' } });
     const data = await r.json();
@@ -215,13 +247,12 @@ app.post('/api/jobs', async (req, res) => {
     if (keywords) url.searchParams.set('q',        keywords);
     if (jiWhere)  url.searchParams.set('where',    jiWhere);
     if (jiTypes)  url.searchParams.set('jobtypes', jiTypes);
-    url.searchParams.set('maxdate', '');
 
     const r   = await fetch(url.toString(), {
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible; JobOverview/1.0)' },
     });
-    const xml = await r.text();
-    const items = parseRSS(xml).slice(0, 10);
+    const xml   = await r.text();
+    const items = parseRSS(xml);
     for (const j of items) {
       const id = 'ji_' + Buffer.from(j.link).toString('base64').slice(0, 16);
       results.push({
@@ -238,14 +269,17 @@ app.post('/api/jobs', async (req, res) => {
     if (items.length) sources.push('Jobindex.dk');
   } catch (e) { console.error('Jobindex:', e.message); }
 
-  // Deduplicate by normalised title+company, keep max 10
+  // Post-filter by location and job type, then deduplicate, keep top 10
   const seen   = new Set();
-  const unique = results.filter(j => {
-    const key = (j.title + j.company).toLowerCase().replace(/\s+/g, '');
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  }).slice(0, 10);
+  const unique = results
+    .filter(j => matchesLocation(j.location, location) && matchesType(j, type))
+    .filter(j => {
+      const key = (j.title + j.company).toLowerCase().replace(/\s+/g, '');
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 10);
 
   res.json({ jobs: unique, sources });
 });
