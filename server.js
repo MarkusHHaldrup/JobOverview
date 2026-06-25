@@ -151,21 +151,39 @@ function matchesApp(app, from, subject, snippet) {
 }
 
 // ── RSS helper ───────────────────────────────────────────────────
+function decodeEntities(str) {
+  return str
+    .replace(/&#x([0-9A-Fa-f]+);/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
+    .replace(/&#(\d+);/g,           (_, d) => String.fromCharCode(parseInt(d)))
+    .replace(/&amp;/g,  '&').replace(/&lt;/g,   '<')
+    .replace(/&gt;/g,   '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'");
+}
+
 function parseRSS(xml) {
-  const items = [];
+  const items  = [];
   const itemRx = /<item>([\s\S]*?)<\/item>/g;
-  const valRx  = tag => new RegExp(`<${tag}[^>]*>(?:<!\\[CDATA\\[([\\s\\S]*?)\\]\\]>|([\\s\\S]*?))<\\/${tag}>`, 'i');
-  const get    = (block, tag) => { const m = block.match(valRx(tag)); return m ? (m[1] ?? m[2] ?? '').trim() : ''; };
+  const tagRx  = tag => new RegExp(`<${tag}[^>]*>(?:<!\\[CDATA\\[([\\s\\S]*?)\\]\\]>|([\\s\\S]*?))<\\/${tag}>`, 'i');
+  const get    = (b, tag) => { const m = b.match(tagRx(tag)); return m ? (m[1] ?? m[2] ?? '').trim() : ''; };
   let m;
   while ((m = itemRx.exec(xml)) !== null) {
-    const b = m[1];
+    const b    = m[1];
+    const raw  = get(b, 'description');
+    const html = decodeEntities(raw);                                       // un-escape the inner HTML
+    const locM = html.match(/class="jix_robotjob--area"[^>]*>([^<]+)</i);  // extract city from span
+    const loc  = locM ? locM[1].trim() : '';
+    const text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 220);
+    const raw   = decodeEntities(get(b, 'title'));
+    const comma = raw.lastIndexOf(', ');
+    const title   = comma > 0 ? raw.slice(0, comma).trim() : raw;
+    const company = comma > 0 ? raw.slice(comma + 2).trim() : (decodeEntities(get(b, 'author')) || '—');
+    const link    = get(b, 'link').replace(/\s/g, '');
     items.push({
-      title:       get(b, 'title'),
-      link:        get(b, 'link').replace(/\s/g,''),
-      description: get(b, 'description').replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim().slice(0, 220),
-      company:     get(b, 'jix:company') || get(b, 'author') || '—',
-      location:    get(b, 'jix:area')    || get(b, 'jix:location') || '',
-      pubDate:     get(b, 'pubDate'),
+      title,
+      link,
+      description: text,
+      company,
+      location: loc,
+      pubDate:  get(b, 'pubDate'),
     });
   }
   return items;
@@ -205,64 +223,36 @@ function matchesType(job, type) {
 
 // ── Multi-source job search ──────────────────────────────────────
 app.post('/api/jobs', async (req, res) => {
-  const { keywords = '', location = 'Copenhagen', type = '' } = req.body;
+  const { keywords = '', location = 'Copenhagen', type = '', apiId = '', apiKey = '' } = req.body;
   const results = [];
   const sources = [];
 
-  const loc = location === 'all' ? '' : location;
-  const jobnetCity = { Copenhagen: 'København', Aarhus: 'Aarhus', Odense: 'Odense', '': '' }[loc] ?? loc;
-  const jobnetQ    = type === 'student'
-    ? `${keywords} studiejob studentermedhjælper`.trim()
-    : keywords;
-
-  const jiWhere = { Copenhagen: 'storkbh', Aarhus: 'midtjylland', Odense: 'fyn', '': '' }[loc] ?? '';
+  const loc     = location === 'all' ? '' : location;
   const jiTypes = type === 'student' ? 'studiejob' : type === 'parttime' ? 'deltid' : '';
+  const azWhere = { Copenhagen: 'Copenhagen', Aarhus: 'Aarhus', Odense: 'Odense', '': '' }[loc] ?? loc;
+  const azType  = { fulltime: 'permanent', parttime: 'part_time', student: '' }[type] || '';
+  const azQ     = type === 'student' ? `${keywords} student studiejob`.trim() : keywords;
 
-  // ── Source 1: Jobnet.dk ─────────────────────────────────────────
-  try {
-    const url = new URL('https://job.jobnet.dk/CV/FindWork/Search');
-    url.searchParams.set('Offset',    '0');
-    url.searchParams.set('SortValue', 'BestMatch');
-    url.searchParams.set('Hits',      '20');
-    if (jobnetQ)    url.searchParams.set('SearchString',  jobnetQ);
-    if (jobnetCity) url.searchParams.set('WorkPlaceCity', jobnetCity);
-
-    const r    = await fetch(url.toString(), { headers: { Accept: 'application/json' } });
-    const data = await r.json();
-    for (const j of data.JobPositionPostings || []) {
-      results.push({
-        id:       'jn_' + j.AutoNo,
-        title:    j.Headline || '',
-        company:  j.EmployerName || j.WorkPlaceName || '—',
-        location: j.WorkPlaceCity || jobnetCity || 'Denmark',
-        snippet:  (j.JobPositionInformation || j.JobPositionTitle || '').slice(0, 220),
-        url:      `https://job.jobnet.dk/CV/FindWork/Details/${j.AutoNo}`,
-        source:   'Jobnet.dk',
-        date:     j.PostingDate || '',
-      });
-    }
-    if (data.JobPositionPostings?.length) sources.push('Jobnet.dk');
-  } catch (e) { console.error('Jobnet:', e.message); }
-
-  // ── Source 2: Jobindex.dk RSS ───────────────────────────────────
+  // ── Source 1: Jobindex.dk RSS ───────────────────────────────────
   try {
     const url = new URL('https://www.jobindex.dk/jobsoegning.xml');
     if (keywords) url.searchParams.set('q',        keywords);
-    if (jiWhere)  url.searchParams.set('where',    jiWhere);
     if (jiTypes)  url.searchParams.set('jobtypes', jiTypes);
 
-    const r   = await fetch(url.toString(), {
+    const r    = await fetch(url.toString(), {
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible; JobOverview/1.0)' },
     });
-    const xml   = await r.text();
+    // Jobindex RSS is ISO-8859-1 — decode correctly
+    const buf  = await r.arrayBuffer();
+    const xml  = new TextDecoder('iso-8859-1').decode(buf);
     const items = parseRSS(xml);
     for (const j of items) {
-      const id = 'ji_' + Buffer.from(j.link).toString('base64').slice(0, 16);
+      const id = 'ji_' + (j.link.match(/\/([a-z0-9]+)$/i)?.[1] || Buffer.from(j.link).toString('base64').slice(-12));
       results.push({
         id,
         title:    j.title,
         company:  j.company,
-        location: j.location || '',   // leave empty if RSS doesn't provide it
+        location: j.location || '',
         snippet:  j.description,
         url:      j.link,
         source:   'Jobindex.dk',
@@ -271,6 +261,36 @@ app.post('/api/jobs', async (req, res) => {
     }
     if (items.length) sources.push('Jobindex.dk');
   } catch (e) { console.error('Jobindex:', e.message); }
+
+  // ── Source 2: Adzuna ────────────────────────────────────────────
+  if (apiId && apiKey) {
+    try {
+      const url = new URL('https://api.adzuna.com/v1/api/jobs/dk/search/1');
+      url.searchParams.set('app_id',           apiId);
+      url.searchParams.set('app_key',          apiKey);
+      url.searchParams.set('results_per_page', '15');
+      url.searchParams.set('sort_by',          'relevance');
+      if (azQ)     url.searchParams.set('what',          azQ);
+      if (azWhere) url.searchParams.set('where',         azWhere);
+      if (azType)  url.searchParams.set('contract_type', azType);
+
+      const r    = await fetch(url.toString());
+      const data = await r.json();
+      for (const j of data.results || []) {
+        results.push({
+          id:       'az_' + j.id,
+          title:    j.title || '',
+          company:  j.company?.display_name || '—',
+          location: j.location?.display_name || azWhere || '',
+          snippet:  (j.description || '').replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim().slice(0, 220),
+          url:      j.redirect_url || '',
+          source:   'Adzuna',
+          date:     j.created || '',
+        });
+      }
+      if (data.results?.length) sources.push('Adzuna');
+    } catch (e) { console.error('Adzuna:', e.message); }
+  }
 
   // Post-filter by location and job type, then deduplicate, keep top 10
   const seen   = new Set();
