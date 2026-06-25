@@ -200,13 +200,15 @@ const LOCATION_KEYWORDS = {
   Odense:     ['odense', 'fyn', 'funen', 'svendborg', 'nyborg', 'kerteminde'],
 };
 
-const STUDENT_KEYWORDS  = ['studiejob', 'studentermedhjælper', 'student assistant',
-                            'studentjob', 'studentermedhjælp'];
-const PARTTIME_KEYWORDS = ['deltid', 'part-time', 'part time', 'delstilling'];
+const STUDENT_KEYWORDS_DA = ['studiejob', 'studentermedhjælper', 'student assistant',
+                              'studentjob', 'studentermedhjælp'];
+const STUDENT_KEYWORDS_EN = ['intern', 'internship', 'trainee', 'graduate', 'junior',
+                              'entry-level', 'entry level', 'student job', 'student position'];
+const PARTTIME_KEYWORDS   = ['deltid', 'part-time', 'part time', 'delstilling'];
 
 function matchesLocation(jobLoc, requested) {
   if (!requested || requested === 'all') return true;
-  if (!jobLoc) return false;   // unknown location — exclude when a filter is active
+  if (!jobLoc) return false;
   const loc  = jobLoc.toLowerCase();
   const keys = LOCATION_KEYWORDS[requested];
   if (!keys) return true;
@@ -216,7 +218,11 @@ function matchesLocation(jobLoc, requested) {
 function matchesType(job, type) {
   if (!type || type === 'any' || type === 'fulltime') return true;
   const text = (job.title + ' ' + job.snippet).toLowerCase();
-  if (type === 'student')  return STUDENT_KEYWORDS.some(k => text.includes(k));
+  if (type === 'student') {
+    // TheHub lists jobs in English — use English keywords; Jobindex uses Danish
+    const keywords = job.source === 'TheHub.io' ? STUDENT_KEYWORDS_EN : STUDENT_KEYWORDS_DA;
+    return keywords.some(k => text.includes(k));
+  }
   if (type === 'parttime') return PARTTIME_KEYWORDS.some(k => text.includes(k));
   return true;
 }
@@ -232,14 +238,15 @@ app.post('/api/jobs', async (req, res) => {
   const azType  = { fulltime: 'permanent', parttime: 'part_time', student: '', any: '' }[type] || '';
 
   // Jobindex ignores jobtypes= in RSS — inject type terms into keyword search instead
+  // TheHub ignores q= entirely, so only Jobindex benefits from these
   const TYPE_EXTRA = {
     student:  'studiejob studentermedhjælper',
     parttime: 'deltid',
     fulltime: 'fuldtid',
   };
   const typeExtra = TYPE_EXTRA[type] || '';
-  const jiQ  = [keywords, typeExtra].filter(Boolean).join(' ');
-  const azQ  = [keywords, type === 'student' ? 'student studiejob' : ''].filter(Boolean).join(' ');
+  const jiQ = [keywords, typeExtra].filter(Boolean).join(' ');
+  const azQ = [keywords, type === 'student' ? 'studiejob' : typeExtra].filter(Boolean).join(' ');
 
   // ── Source 1: Jobindex.dk RSS ───────────────────────────────────
   try {
@@ -253,7 +260,7 @@ app.post('/api/jobs', async (req, res) => {
     const buf  = await r.arrayBuffer();
     const xml  = new TextDecoder('iso-8859-1').decode(buf);
     const items = parseRSS(xml);
-    for (const j of items.slice(0, 10)) {
+    for (const j of items) {
       const id = 'ji_' + (j.link.match(/\/([a-z0-9]+)$/i)?.[1] || Buffer.from(j.link).toString('base64').slice(-12));
       results.push({
         id,
