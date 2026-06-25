@@ -1,8 +1,8 @@
-require('dotenv').config();
-const express  = require('express');
-const { google } = require('googleapis');
 const path     = require('path');
 const fs       = require('fs');
+require('dotenv').config({ path: path.join(__dirname, '.env') });
+const express  = require('express');
+const { google } = require('googleapis');
 
 const app = express();
 app.use(express.json());
@@ -38,6 +38,7 @@ if (fs.existsSync(TOKENS_FILE)) {
 }
 
 oauth2Client.on('tokens', tokens => {
+  if (!storedTokens) storedTokens = {};
   if (tokens.refresh_token) storedTokens.refresh_token = tokens.refresh_token;
   storedTokens.access_token = tokens.access_token;
   fs.writeFileSync(TOKENS_FILE, JSON.stringify(storedTokens, null, 2));

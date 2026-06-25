@@ -257,6 +257,7 @@ async function initGmail() {
     const data = await res.json();
     _gmailAvailable = true;
     showGmailPane(data.authenticated ? 'connected' : 'disconnected');
+    if (data.authenticated) autoSyncGmail();
   } catch {
     _gmailAvailable = false;
     showGmailPane('unavailable');
@@ -267,12 +268,47 @@ async function initGmail() {
   if (params.get('gmail_ok')) {
     history.replaceState({}, '', location.pathname);
     showGmailPane('connected');
-    showToast('Gmail connected! Click "Sync with Gmail" to check your emails.');
+    showToast('Gmail connected! Syncing your emails…');
     switchTab('applications');
+    autoSyncGmail();
   } else if (params.get('gmail_error')) {
     history.replaceState({}, '', location.pathname);
     showToast('Gmail authorisation failed — please try again.');
   }
+}
+
+async function autoSyncGmail() {
+  try {
+    const res = await fetch('/api/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        applications: applications.map(a => ({ id: a.id, title: a.title, company: a.company })),
+      }),
+    });
+    if (!res.ok) return;
+
+    const { updates } = await res.json();
+    const changed = updates.filter(u => {
+      const app = applications.find(a => a.id === u.appId);
+      return app && app.status !== u.newStatus;
+    });
+
+    for (const u of changed) {
+      const app = applications.find(a => a.id === u.appId);
+      if (!app) continue;
+      app.status        = u.newStatus;
+      app.lastEmail     = u.emailSubject;
+      app.lastEmailDate = u.emailDate;
+    }
+
+    if (changed.length > 0) {
+      saveData();
+      updateBadge();
+      renderApplications();
+      showToast(`${changed.length} application${changed.length > 1 ? 's' : ''} updated from Gmail.`);
+    }
+  } catch { /* silent fail on auto-sync */ }
 }
 
 function connectGmail() {
