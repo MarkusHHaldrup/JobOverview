@@ -173,20 +173,22 @@ function parseRSS(xml) {
 
 // ── Location & type post-filters ────────────────────────────────
 const LOCATION_KEYWORDS = {
-  Copenhagen: ['københavn', 'copenhagen', 'kbh', 'frederiksberg', 'hellerup', 'gentofte',
-               'lyngby', 'gladsaxe', 'brøndby', 'hvidovre', 'rødovre', 'ballerup',
-               'herlev', 'søborg', 'charlottenlund', 'vanløse', 'valby', 'amager',
-               'østerbro', 'nørrebro', 'vesterbro', 'indre by'],
-  Aarhus:     ['aarhus', 'århus', 'brabrand', 'viby', 'skejby', 'risskov'],
-  Odense:     ['odense', 'fyn', 'funen', 'svendborg', 'nyborg'],
+  Copenhagen: ['københavn', 'copenhagen', 'kbh', 'storkøbenhavn', 'frederiksberg',
+               'hellerup', 'gentofte', 'lyngby', 'gladsaxe', 'brøndby', 'hvidovre',
+               'rødovre', 'ballerup', 'herlev', 'søborg', 'charlottenlund', 'vanløse',
+               'valby', 'amager', 'østerbro', 'nørrebro', 'vesterbro', 'indre by',
+               'taastrup', 'albertslund', 'ishøj', 'greve', 'solrød', 'dragør'],
+  Aarhus:     ['aarhus', 'århus', 'midtjylland', 'brabrand', 'viby', 'skejby', 'risskov'],
+  Odense:     ['odense', 'fyn', 'funen', 'svendborg', 'nyborg', 'kerteminde'],
 };
 
-const STUDENT_KEYWORDS = ['studiejob', 'studentermedhjælper', 'student assistant',
-                          'studentjob', 'studentermedhjælp', 'studiejob'];
+const STUDENT_KEYWORDS  = ['studiejob', 'studentermedhjælper', 'student assistant',
+                            'studentjob', 'studentermedhjælp'];
 const PARTTIME_KEYWORDS = ['deltid', 'part-time', 'part time', 'delstilling'];
 
 function matchesLocation(jobLoc, requested) {
-  if (!requested) return true;
+  if (!requested || requested === 'all') return true;
+  if (!jobLoc) return false;   // unknown location — exclude when a filter is active
   const loc  = jobLoc.toLowerCase();
   const keys = LOCATION_KEYWORDS[requested];
   if (!keys) return true;
@@ -207,12 +209,13 @@ app.post('/api/jobs', async (req, res) => {
   const results = [];
   const sources = [];
 
-  const jobnetCity = { Copenhagen: 'København', Aarhus: 'Aarhus', Odense: 'Odense', '': '' }[location] ?? location;
+  const loc = location === 'all' ? '' : location;
+  const jobnetCity = { Copenhagen: 'København', Aarhus: 'Aarhus', Odense: 'Odense', '': '' }[loc] ?? loc;
   const jobnetQ    = type === 'student'
     ? `${keywords} studiejob studentermedhjælper`.trim()
     : keywords;
 
-  const jiWhere = { Copenhagen: 'storkbh', Aarhus: 'midtjylland', Odense: 'fyn', '': '' }[location] ?? '';
+  const jiWhere = { Copenhagen: 'storkbh', Aarhus: 'midtjylland', Odense: 'fyn', '': '' }[loc] ?? '';
   const jiTypes = type === 'student' ? 'studiejob' : type === 'parttime' ? 'deltid' : '';
 
   // ── Source 1: Jobnet.dk ─────────────────────────────────────────
@@ -259,7 +262,7 @@ app.post('/api/jobs', async (req, res) => {
         id,
         title:    j.title,
         company:  j.company,
-        location: j.location || location || 'Denmark',
+        location: j.location || '',   // leave empty if RSS doesn't provide it
         snippet:  j.description,
         url:      j.link,
         source:   'Jobindex.dk',
