@@ -154,6 +154,8 @@ nav { display: flex; }
 .filter-btn:hover { border-color: var(--blue); color: var(--blue); }
 .filter-btn.active { background: var(--blue); color: #fff; border-color: var(--blue); }
 
+.toolbar-actions { display: flex; gap: .5rem; align-items: center; flex-shrink: 0; }
+
 #add-btn {
   padding: .45rem 1.1rem; background: var(--blue); color: #fff;
   border: none; border-radius: 8px; cursor: pointer;
@@ -161,6 +163,17 @@ nav { display: flex; }
   transition: background .15s;
 }
 #add-btn:hover { background: var(--blue-dk); }
+
+.gmail-btn {
+  padding: .45rem 1.1rem; border: none; border-radius: 8px;
+  cursor: pointer; font-size: .875rem; font-weight: 500;
+  white-space: nowrap; transition: background .15s;
+  background: #f3f4f6; color: var(--muted);
+}
+.gmail-btn:hover { background: var(--border); }
+.gmail-btn.connected { background: #dcfce7; color: #166534; }
+.gmail-btn.syncing   { background: #eff6ff; color: var(--blue); cursor: wait; }
+.gmail-btn.unavailable { opacity: .4; cursor: not-allowed; }
 
 /* ── Application cards ── */
 #app-list { display: flex; flex-direction: column; gap: .65rem; }

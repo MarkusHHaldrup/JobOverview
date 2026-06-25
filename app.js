@@ -241,6 +241,104 @@ function saveApiKey() {
   searchJobs();
 }
 
+// ── Gmail sync ─────────────────────────────────────────────────────
+let _gmailAvailable = false; // true when running via the Node server
+
+async function initGmail() {
+  const btn = document.getElementById('gmail-btn');
+  try {
+    const res  = await fetch('/auth/status', { signal: AbortSignal.timeout(1500) });
+    const data = await res.json();
+    _gmailAvailable = true;
+    if (data.authenticated) {
+      btn.textContent = '⟳ Sync Gmail';
+      btn.classList.add('connected');
+    } else {
+      btn.textContent = '📧 Connect Gmail';
+    }
+  } catch {
+    // Server not running — disable the button
+    _gmailAvailable = false;
+    btn.classList.add('unavailable');
+    btn.title = 'Start the Node server to enable Gmail sync';
+  }
+
+  // Handle redirect back from OAuth
+  const params = new URLSearchParams(location.search);
+  if (params.get('gmail_ok')) {
+    history.replaceState({}, '', '/');
+    showToast('Gmail connected! Click "Sync Gmail" to check your emails.');
+    btn.textContent = '⟳ Sync Gmail';
+    btn.classList.add('connected');
+    switchTab('applications');
+  } else if (params.get('gmail_error')) {
+    history.replaceState({}, '', '/');
+    showToast('Gmail authorisation failed — please try again.');
+  }
+}
+
+async function handleGmailBtn() {
+  if (!_gmailAvailable) return;
+  const btn = document.getElementById('gmail-btn');
+
+  if (!btn.classList.contains('connected')) {
+    // Not yet authorised — redirect to OAuth flow
+    window.location.href = '/auth/google';
+    return;
+  }
+
+  // Sync
+  btn.textContent = '⏳ Syncing…';
+  btn.classList.add('syncing');
+  btn.disabled = true;
+
+  try {
+    const res = await fetch('/api/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        applications: applications.map(a => ({ id: a.id, title: a.title, company: a.company })),
+      }),
+    });
+
+    if (res.status === 401) {
+      btn.classList.remove('connected');
+      btn.textContent = '📧 Connect Gmail';
+      showToast('Gmail session expired — please reconnect.');
+      return;
+    }
+    if (!res.ok) throw new Error(`Server error ${res.status}`);
+
+    const { updates } = await res.json();
+    let changed = 0;
+    for (const u of updates) {
+      const app = applications.find(a => a.id === u.appId);
+      if (app && app.status !== u.newStatus) {
+        app.status        = u.newStatus;
+        app.lastEmail     = u.emailSubject;
+        app.lastEmailDate = u.emailDate;
+        changed++;
+      }
+    }
+
+    saveData();
+    updateBadge();
+    renderApplications();
+
+    showToast(
+      changed > 0
+        ? `${changed} application${changed > 1 ? 's' : ''} updated from Gmail.`
+        : 'Gmail synced — no new status changes found.'
+    );
+  } catch (err) {
+    showToast('Sync failed: ' + err.message);
+  } finally {
+    btn.textContent = '⟳ Sync Gmail';
+    btn.classList.remove('syncing');
+    btn.disabled = false;
+  }
+}
+
 // ── Toast ──────────────────────────────────────────────────────────
 let _toastTimer;
 function showToast(msg) {
@@ -282,6 +380,10 @@ function init() {
   document.getElementById('settings-btn').addEventListener('click', openApiModal);
   document.getElementById('btn-save-api').addEventListener('click', saveApiKey);
   document.getElementById('btn-cancel-api').addEventListener('click', closeApiModal);
+
+  // Gmail
+  document.getElementById('gmail-btn').addEventListener('click', handleGmailBtn);
+  initGmail();
 
   // Manual add
   document.getElementById('add-btn').addEventListener('click', openManualModal);
