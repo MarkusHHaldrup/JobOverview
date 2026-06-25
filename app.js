@@ -1,8 +1,9 @@
 // ── State ──────────────────────────────────────────────────────────
 let applications  = [];
-let rejectedIds   = new Set();   // job IDs dismissed in browse view
+let rejectedIds   = new Set();
 let currentFilter = 'all';
-let _jobMap       = {};          // id → raw Adzuna job object, for accept handler
+let _jobMap       = {};
+let _searchTags   = [];  // keyword chips
 
 const STATUSES = {
   waiting:   'Waiting to Apply',
@@ -38,9 +39,40 @@ function updateBadge() {
   el.classList.toggle('hidden', n === 0);
 }
 
+// ── Keyword tags ───────────────────────────────────────────────────
+function renderTags() {
+  document.getElementById('tag-list').innerHTML = _searchTags.map(t => `
+    <span class="tag-chip">${escHtml(t)}<button type="button" onclick="removeTag('${escHtml(t)}')" aria-label="Remove">×</button></span>
+  `).join('');
+}
+
+function addTag(value) {
+  const v = value.trim();
+  if (!v || _searchTags.includes(v)) return;
+  _searchTags.push(v);
+  renderTags();
+  document.getElementById('search-keywords').value = '';
+}
+
+function removeTag(value) {
+  _searchTags = _searchTags.filter(t => t !== value);
+  renderTags();
+}
+
+function clearFilters() {
+  _searchTags = [];
+  renderTags();
+  document.getElementById('search-keywords').value = '';
+  document.getElementById('search-location').value = 'Copenhagen';
+  document.getElementById('search-type').value = '';
+  searchJobs();
+}
+
 // ── Job Search ─────────────────────────────────────────────────────
 async function searchJobs() {
-  const keywords = document.getElementById('search-keywords').value.trim();
+  const input = document.getElementById('search-keywords').value.trim();
+  if (input) addTag(input);   // commit any pending typed word first
+  const keywords = _searchTags.join(' ');
   const location = document.getElementById('search-location').value;
   const type     = document.getElementById('search-type').value;
   const grid     = document.getElementById('job-list');
@@ -446,10 +478,17 @@ function init() {
     btn.addEventListener('click', () => switchTab(btn.dataset.tab))
   );
 
-  // Search
+  // Search & filter bar
   document.getElementById('search-btn').addEventListener('click', searchJobs);
+  document.getElementById('clear-btn').addEventListener('click', clearFilters);
+  document.getElementById('tag-input-wrap').addEventListener('click', () =>
+    document.getElementById('search-keywords').focus()
+  );
   document.getElementById('search-keywords').addEventListener('keydown', e => {
-    if (e.key === 'Enter') searchJobs();
+    if (e.key === 'Enter') { e.preventDefault(); searchJobs(); }
+    if (e.key === 'Backspace' && e.target.value === '' && _searchTags.length) {
+      removeTag(_searchTags[_searchTags.length - 1]);
+    }
   });
 
   // Settings

@@ -19,7 +19,10 @@
   <!-- ── Browse Jobs ── -->
   <section id="browse" class="tab-content active">
     <div class="filter-bar">
-      <input id="search-keywords" type="text" placeholder="Job title or keywords…">
+      <div class="tag-input-wrap" id="tag-input-wrap">
+        <div id="tag-list"></div>
+        <input id="search-keywords" type="text" placeholder="Add keyword, press Enter…" autocomplete="off">
+      </div>
       <select id="search-location">
         <option value="Copenhagen">📍 Copenhagen</option>
         <option value="Aarhus">📍 Aarhus</option>
@@ -33,7 +36,8 @@
         <option value="parttime">Part-time</option>
       </select>
       <button id="search-btn">Search</button>
-      <button id="settings-btn" title="Adzuna API settings">⚙</button>
+      <button id="clear-btn" title="Clear all filters">✕ Clear</button>
+      <button id="settings-btn" title="API settings">⚙</button>
     </div>
     <div id="job-source-bar" class="job-source-bar hidden"></div>
     <div id="job-list" class="job-grid"></div>

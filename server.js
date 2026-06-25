@@ -150,59 +150,47 @@ function matchesApp(app, from, subject, snippet) {
   return matched >= Math.ceil(words.length * 0.7);
 }
 
+// ── RSS helper ───────────────────────────────────────────────────
+function parseRSS(xml) {
+  const items = [];
+  const itemRx = /<item>([\s\S]*?)<\/item>/g;
+  const valRx  = tag => new RegExp(`<${tag}[^>]*>(?:<!\\[CDATA\\[([\\s\\S]*?)\\]\\]>|([\\s\\S]*?))<\\/${tag}>`, 'i');
+  const get    = (block, tag) => { const m = block.match(valRx(tag)); return m ? (m[1] ?? m[2] ?? '').trim() : ''; };
+  let m;
+  while ((m = itemRx.exec(xml)) !== null) {
+    const b = m[1];
+    items.push({
+      title:       get(b, 'title'),
+      link:        get(b, 'link').replace(/\s/g,''),
+      description: get(b, 'description').replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim().slice(0, 220),
+      company:     get(b, 'jix:company') || get(b, 'author') || '—',
+      location:    get(b, 'jix:area')    || get(b, 'jix:location') || '',
+      pubDate:     get(b, 'pubDate'),
+    });
+  }
+  return items;
+}
+
 // ── Multi-source job search ──────────────────────────────────────
 app.post('/api/jobs', async (req, res) => {
-  const { keywords = '', location = 'Copenhagen', type = '', apiId = '', apiKey = '' } = req.body;
+  const { keywords = '', location = 'Copenhagen', type = '' } = req.body;
   const results = [];
   const sources = [];
 
-  // Map UI type → Adzuna contract_type
-  const adzunaType = { fulltime: 'permanent', parttime: 'part_time', student: '' }[type] || '';
-  // Map English city → Danish for Jobnet
   const jobnetCity = { Copenhagen: 'København', Aarhus: 'Aarhus', Odense: 'Odense', '': '' }[location] ?? location;
-  // Student keyword for Jobnet
-  const jobnetQuery = type === 'student'
-    ? `${keywords} studiejob studentermedhjælper`.trim()
-    : keywords;
+  const jobnetQ    = type === 'student' ? `${keywords} studiejob studentermedhjælper`.trim() : keywords;
 
-  // ── Source 1: Adzuna ────────────────────────────────────────────
-  if (apiId && apiKey) {
-    try {
-      const url = new URL('https://api.adzuna.com/v1/api/jobs/dk/search/1');
-      url.searchParams.set('app_id',           apiId);
-      url.searchParams.set('app_key',          apiKey);
-      url.searchParams.set('results_per_page', '10');
-      url.searchParams.set('sort_by',          'relevance');
-      if (keywords) url.searchParams.set('what',  keywords);
-      if (location) url.searchParams.set('where', location);
-      if (adzunaType) url.searchParams.set('contract_type', adzunaType);
+  const jiWhere = { Copenhagen: 'storkbh', Aarhus: 'midtjylland', Odense: 'fyn', '': '' }[location] ?? '';
+  const jiTypes = type === 'student' ? 'studiejob' : type === 'parttime' ? 'deltid' : '';
 
-      const r    = await fetch(url.toString());
-      const data = await r.json();
-      for (const j of data.results || []) {
-        results.push({
-          id:       'az_' + j.id,
-          title:    j.title || '',
-          company:  j.company?.display_name || '—',
-          location: j.location?.display_name || location,
-          snippet:  (j.description || '').replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim().slice(0,220),
-          url:      j.redirect_url || '',
-          source:   'Adzuna',
-          date:     j.created || '',
-        });
-      }
-      if (data.results?.length) sources.push('Adzuna');
-    } catch (e) { console.error('Adzuna:', e.message); }
-  }
-
-  // ── Source 2: Jobnet.dk ─────────────────────────────────────────
+  // ── Source 1: Jobnet.dk ─────────────────────────────────────────
   try {
     const url = new URL('https://job.jobnet.dk/CV/FindWork/Search');
-    url.searchParams.set('Offset',     '0');
-    url.searchParams.set('SortValue',  'BestMatch');
-    url.searchParams.set('Hits',       '10');
-    if (jobnetQuery) url.searchParams.set('SearchString', jobnetQuery);
-    if (jobnetCity)  url.searchParams.set('WorkPlaceCity', jobnetCity);
+    url.searchParams.set('Offset',    '0');
+    url.searchParams.set('SortValue', 'BestMatch');
+    url.searchParams.set('Hits',      '10');
+    if (jobnetQ)    url.searchParams.set('SearchString',   jobnetQ);
+    if (jobnetCity) url.searchParams.set('WorkPlaceCity',  jobnetCity);
 
     const r    = await fetch(url.toString(), { headers: { Accept: 'application/json' } });
     const data = await r.json();
@@ -220,6 +208,35 @@ app.post('/api/jobs', async (req, res) => {
     }
     if (data.JobPositionPostings?.length) sources.push('Jobnet.dk');
   } catch (e) { console.error('Jobnet:', e.message); }
+
+  // ── Source 2: Jobindex.dk RSS ───────────────────────────────────
+  try {
+    const url = new URL('https://www.jobindex.dk/jobsoegning.xml');
+    if (keywords) url.searchParams.set('q',        keywords);
+    if (jiWhere)  url.searchParams.set('where',    jiWhere);
+    if (jiTypes)  url.searchParams.set('jobtypes', jiTypes);
+    url.searchParams.set('maxdate', '');
+
+    const r   = await fetch(url.toString(), {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; JobOverview/1.0)' },
+    });
+    const xml = await r.text();
+    const items = parseRSS(xml).slice(0, 10);
+    for (const j of items) {
+      const id = 'ji_' + Buffer.from(j.link).toString('base64').slice(0, 16);
+      results.push({
+        id,
+        title:    j.title,
+        company:  j.company,
+        location: j.location || location || 'Denmark',
+        snippet:  j.description,
+        url:      j.link,
+        source:   'Jobindex.dk',
+        date:     j.pubDate,
+      });
+    }
+    if (items.length) sources.push('Jobindex.dk');
+  } catch (e) { console.error('Jobindex:', e.message); }
 
   // Deduplicate by normalised title+company, keep max 10
   const seen   = new Set();
