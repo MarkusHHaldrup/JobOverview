@@ -40,39 +40,35 @@ function updateBadge() {
 
 // ── Job Search ─────────────────────────────────────────────────────
 async function searchJobs() {
-  const appId  = localStorage.getItem('jov_api_id');
-  const appKey = localStorage.getItem('jov_api_key');
-  const query  = document.getElementById('search-query').value.trim();
-  const grid   = document.getElementById('job-list');
+  const keywords = document.getElementById('search-keywords').value.trim();
+  const location = document.getElementById('search-location').value;
+  const type     = document.getElementById('search-type').value;
+  const grid     = document.getElementById('job-list');
+  const srcBar   = document.getElementById('job-source-bar');
 
-  if (!appId || !appKey) {
-    grid.innerHTML = `
-      <div class="setup-prompt">
-        <h3>Connect your job feed</h3>
-        <p>JobOverview uses the free <a href="https://developer.adzuna.com/" target="_blank" rel="noopener">Adzuna API</a>
-           to find real jobs in Copenhagen.<br>
-           Register (no credit card) to get your App ID and App Key — 1 000 free calls per month.</p>
-        <button onclick="openApiModal()">Set Up API Key</button>
-      </div>`;
-    return;
-  }
-
-  grid.innerHTML = '<div class="loading">Searching jobs in Copenhagen…</div>';
+  grid.innerHTML = `<div class="loading">Searching jobs${location ? ' in ' + location : ' across Denmark'}…</div>`;
+  srcBar.classList.add('hidden');
   _jobMap = {};
 
   try {
-    const url = new URL('https://api.adzuna.com/v1/api/jobs/dk/search/1');
-    url.searchParams.set('app_id',          appId);
-    url.searchParams.set('app_key',         appKey);
-    url.searchParams.set('where',           'Copenhagen');
-    url.searchParams.set('results_per_page','24');
-    url.searchParams.set('sort_by',         'date');
-    if (query) url.searchParams.set('what', query);
+    const appId  = localStorage.getItem('jov_api_id')  || '';
+    const appKey = localStorage.getItem('jov_api_key') || '';
 
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`HTTP ${res.status} — check your API credentials.`);
-    const data = await res.json();
-    renderJobs(data.results || []);
+    const res = await fetch('/api/jobs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ keywords, location, type, apiId: appId, apiKey: appKey }),
+    });
+
+    if (!res.ok) throw new Error(`Server error ${res.status}`);
+    const { jobs, sources } = await res.json();
+
+    if (sources?.length) {
+      srcBar.textContent = `Sources: ${sources.join(' · ')}`;
+      srcBar.classList.remove('hidden');
+    }
+
+    renderJobs(jobs || []);
   } catch (err) {
     grid.innerHTML = `<div class="error-banner">⚠ Could not load jobs: ${escHtml(err.message)}</div>`;
   }
@@ -83,24 +79,25 @@ function renderJobs(jobs) {
   const visible = jobs.filter(j => !rejectedIds.has(String(j.id)));
 
   if (visible.length === 0) {
-    grid.innerHTML = '<div class="empty-state"><h3>No jobs found</h3><p>Try different keywords or clear the search box.</p></div>';
+    grid.innerHTML = '<div class="empty-state"><h3>No jobs found</h3><p>Try different keywords or a broader location.</p></div>';
     return;
   }
 
   grid.innerHTML = visible.map(job => {
     const id      = String(job.id);
-    const title   = job.title || 'Untitled';
-    const company = job.company?.display_name || 'Unknown company';
-    const loc     = job.location?.display_name || 'Copenhagen';
-    const snippet = stripHtml(job.description || '').slice(0, 200) + '…';
-    const link    = job.redirect_url || '#';
+    const title   = job.title   || 'Untitled';
+    const company = job.company || 'Unknown company';
+    const loc     = job.location|| '';
+    const snippet = job.snippet || '';
+    const link    = job.url     || '#';
+    const source  = job.source  || '';
     _jobMap[id]   = { id, title, company, url: link };
 
     return `
     <div class="job-card" id="jcard-${id}">
       <div class="job-title">${escHtml(title)}</div>
-      <div class="job-company">${escHtml(company)}</div>
-      <div class="job-loc">📍 ${escHtml(loc)}</div>
+      <div class="job-company">${escHtml(company)}${source ? ` <span class="job-source-tag">${escHtml(source)}</span>` : ''}</div>
+      ${loc ? `<div class="job-loc">📍 ${escHtml(loc)}</div>` : ''}
       <div class="job-snippet">${escHtml(snippet)}</div>
       <div class="job-footer">
         <a href="${escHtml(link)}" target="_blank" rel="noopener">View posting ↗</a>
@@ -451,7 +448,7 @@ function init() {
 
   // Search
   document.getElementById('search-btn').addEventListener('click', searchJobs);
-  document.getElementById('search-query').addEventListener('keydown', e => {
+  document.getElementById('search-keywords').addEventListener('keydown', e => {
     if (e.key === 'Enter') searchJobs();
   });
 
@@ -489,20 +486,8 @@ function init() {
     })
   );
 
-  // Initial browse state
-  const hasKey = localStorage.getItem('jov_api_id') && localStorage.getItem('jov_api_key');
-  if (hasKey) {
-    searchJobs();
-  } else {
-    document.getElementById('job-list').innerHTML = `
-      <div class="setup-prompt">
-        <h3>Connect your job feed</h3>
-        <p>JobOverview uses the free <a href="https://developer.adzuna.com/" target="_blank" rel="noopener">Adzuna API</a>
-           to find real jobs in Copenhagen.<br>
-           Register (no credit card) to get your App ID and App Key — 1 000 free calls per month.</p>
-        <button onclick="openApiModal()">Set Up API Key</button>
-      </div>`;
-  }
+  // Auto-search on load
+  searchJobs();
 }
 
 init();
